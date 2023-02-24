@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 
-# Copyright 2023 Charles Vanwynsberghe
+# Copyright (c) 2023 Charles Vanwynsberghe
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the “Software”), to deal
-# in the Software without restriction, including without limitation the rights 
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
-# copies of the Software, and to permit persons to whom the Software is 
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
 # The above copyright notice and this permission notice shall be included in
@@ -41,12 +41,12 @@ class CalibrateDiffuse:
 
     def _get_a_est(self, normed=False):
         """
-        Get final gain vector (principal eigenvector of A).
+        Get final gain vector (principal eigenvector of C).
 
         """
-        self.a_est, _, u_est = np.linalg.svd((self.A_ + self.A_.T.conj())/2)
+        self.a_est, s, _ = np.linalg.svd((self.C_ + self.C_.T.conj())/2)
         self.a_est = self.a_est[:, 0]
-        self.a_est *= _[0]**0.5
+        self.a_est *= s[0]**0.5
         self.a_est = self.a_est[:, None]
         if normed:
             self.a_est /= self.a_est.mean()
@@ -54,7 +54,7 @@ class CalibrateDiffuse:
     def pgd_l1(self, reg_l1=0.5, step="opt", n_it=10000, a_init=None,
                normed=False, save_iters=False, verbose=True):
         """
-        Proximal gradient descent solver with trace penalty on A.
+        Proximal gradient descent solver with trace penalty on C.
 
         Parameters
         ----------
@@ -78,25 +78,25 @@ class CalibrateDiffuse:
         if save_iters is True:
             self.a_list = []
 
-        self.A_ = self.a_init @ self.a_init.T.conj()
-        self.rk_A_ = np.zeros((n_it))
+        self.C_ = self.a_init @ self.a_init.T.conj()
+        self.rk_C_ = np.zeros((n_it))
         for n_ in range(n_it):
-            A_old = self.A_
-            self.Z_ = self.A_ + step/2*self.S.conj()*(self.Y - self.S*self.A_)
-            self.A_, self.rk_A_[n_] = prox_st((self.Z_ + self.Z_.T.conj())/2,
+            C_old = self.C_
+            self.Z_ = self.C_ + step/2*self.S.conj()*(self.Y - self.S*self.C_)
+            self.C_, self.rk_C_[n_] = prox_st((self.Z_ + self.Z_.T.conj())/2,
                                                  step*reg_l1)
 
             self._get_a_est(normed=normed)
             if save_iters is True:
                 self.a_list.append(self.a_est)
 
-            if np.linalg.norm(A_old - self.A_) < 1e-6:
-                self.rk_A_ = self.rk_A_[0:n_+1]
+            if np.linalg.norm(C_old - self.C_) < 1e-6:
+                self.rk_C_ = self.rk_C_[0:n_+1]
                 if save_iters is True:
                     self.a_list = np.array(self.a_list).squeeze()
                 if verbose:
                     print(f"pgd-l1 done, {n_} iterations, "
-                          f"rank(A) = {self.rk_A_[-1]}")
+                          f"rank(C) = {self.rk_C_[-1]}")
                 break
 
         self._get_a_est(normed=normed)
@@ -104,11 +104,11 @@ class CalibrateDiffuse:
     def pgd_l0(self, reg_l0=1, step="opt", n_it=10000, a_init=None,
                normed=False, save_iters=False, verbose=True):
         """
-        Proximal gradient descent solver with rank penalty on A.
+        Proximal gradient descent solver with rank penalty on C.
 
         Parameters
         ----------
-        reg_l1 : rank of the matrix A
+        reg_l1 : rank of the matrix C
         step : gradient step
         n_it : max number of iterations
         a_init : gains at initialization
@@ -118,7 +118,7 @@ class CalibrateDiffuse:
 
         Parameters
         ----------
-        reg_l0 : rank of the projected matrix A_
+        reg_l0 : rank of the projected matrix C_
         step : gradient step
         n_it : max number of iterations
         a_init : gains at initialization
@@ -136,19 +136,19 @@ class CalibrateDiffuse:
         if save_iters is True:
             self.a_list = []
 
-        self.A_ = self.a_init @ self.a_init.T.conj()
-        self.rk_A_ = np.zeros((n_it))
+        self.C_ = self.a_init @ self.a_init.T.conj()
+        self.rk_C_ = np.zeros((n_it))
         for n_ in range(n_it):
-            A_old = self.A_
-            self.Z_ = self.A_ + step/2*self.S*(self.Y - self.S*self.A_)
-            self.A_, self.rk_A_[n_] = prox_ht((self.Z_ + self.Z_.T.conj())/2,
+            C_old = self.C_
+            self.Z_ = self.C_ + step/2*self.S*(self.Y - self.S*self.C_)
+            self.C_, self.rk_C_[n_] = prox_ht((self.Z_ + self.Z_.T.conj())/2,
                                                    reg_l0)
             self._get_a_est(normed=normed)
             if save_iters is True:
                 self.a_list.append(self.a_est)
 
-            if np.linalg.norm(A_old - self.A_) < 1e-7:
-                self.rk_A_ = self.rk_A_[0:n_+1]
+            if np.linalg.norm(C_old - self.C_) < 1e-7:
+                self.rk_C_ = self.rk_C_[0:n_+1]
                 if verbose:
                     print(f"pgd-l0 done, {n_} iterations")
                 break
@@ -164,7 +164,7 @@ class CalibrateDiffuse:
         normed : indicate if estimated gain vector should be normalized
 
         """
-        self.A_ = self.Y/self.S
+        self.C_ = self.Y/self.S
         self._get_a_est(normed=normed)
 
     def scale_to(self, a_ref):
